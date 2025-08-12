@@ -4,24 +4,15 @@ pragma solidity ^0.8.24;
 import "openzeppelin-contracts/token/ERC20/ERC20.sol";
 import "openzeppelin-contracts/access/Ownable.sol"; 
 
-// Kontrak untuk MockBTC
 contract MockBTC is ERC20 {
     constructor(address initialOwner) ERC20("Mock Bitcoin", "MBTC")  {
-        // Mint 1 miliar token MockBTC ke deployer (initialOwner)
-        // (1,000,000,000 * 10^18)
         _mint(initialOwner, 1000000000 * (10**decimals()));
     }
 
-    /**
-     * Berguna untuk development dan testing.
-     */
     function mint(address to, uint256 amount) public {
         _mint(to, amount);
     }
 
-    /**
-     * Fungsi untuk burn token oleh pemilik atau pemegang token.
-     */
     function burn(uint256 amount) public {
         _burn(msg.sender, amount);
     }

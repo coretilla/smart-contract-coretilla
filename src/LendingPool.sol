@@ -8,14 +8,14 @@ contract LendingPool is Ownable {
     IERC20 public immutable mockBTCToken;
     IERC20 public immutable mockUSDTToken;
 
-    // Harga MockBTC dalam MockUSDT (dengan asumsi keduanya 18 desimal)
-    // Misal: 1 MockBTC = 50,000 MockUSDT -> btcPriceInUSDT = 50000 * 10**18
+    // MockBTC price in MockUSDT (assuming both have 18 decimals)
+    // Example: 1 MockBTC = 50,000 MockUSDT -> btcPriceInUSDT = 50000 * 10**18
     uint256 public btcPriceInUSDT; 
-    // Loan To Value Ratio dalam persen, misal 50 untuk 50%
+    // Loan To Value Ratio in percent, e.g., 50 for 50%
     uint256 public loanToValueRatioPercent; 
 
-    mapping(address => uint256) public collateralBalancesBTC; // Jumlah MockBTC yang dijaminkan
-    mapping(address => uint256) public borrowedBalancesUSDT;  // Jumlah MockUSDT yang dipinjam
+    mapping(address => uint256) public collateralBalancesBTC; // Amount of MockBTC pledged as collateral
+    mapping(address => uint256) public borrowedBalancesUSDT;  // Amount of MockUSDT borrowed
 
     event CollateralDeposited(address indexed user, uint256 btcAmount);
     event CollateralWithdrawn(address indexed user, uint256 btcAmount);
@@ -28,15 +28,15 @@ contract LendingPool is Ownable {
     constructor(
         address _mockBTCTokenAddress,
         address _mockUSDTTokenAddress,
-        uint256 _initialBTCPriceInUSDT, // Misal: 50000 * 10**18
-        uint256 _initialLTVPercent,     // Misal: 50 (untuk 50%)
+        uint256 _initialBTCPriceInUSDT, // Example: 50000 * 10**18
+        uint256 _initialLTVPercent,     // Example: 50 (for 50%)
         address initialOwner
     ) Ownable(initialOwner) {
         mockBTCToken = IERC20(_mockBTCTokenAddress);
         mockUSDTToken = IERC20(_mockUSDTTokenAddress);
         btcPriceInUSDT = _initialBTCPriceInUSDT;
         loanToValueRatioPercent = _initialLTVPercent;
-        require(_initialLTVPercent > 0 && _initialLTVPercent <= 80, "LTV must be between 1-80%"); // Batas aman
+        require(_initialLTVPercent > 0 && _initialLTVPercent <= 80, "LTV must be between 1-80%"); // Safety limit
     }
 
     // --- Admin Functions ---
@@ -52,8 +52,8 @@ contract LendingPool is Ownable {
     }
 
     /**
-     * @dev Admin bisa mengirimkan MockUSDT ke kontrak ini agar bisa dipinjamkan.
-     * Panggil fungsi 'approve' di kontrak MockUSDT dari akun admin dulu.
+     * @dev Admin can send MockUSDT to this contract so it can be lent out.
+     * Call the 'approve' function on the MockUSDT contract from the admin account first.
      */
     function fundPool(uint256 _amountUSDT) external onlyOwner {
         mockUSDTToken.transferFrom(msg.sender, address(this), _amountUSDT);
@@ -73,11 +73,11 @@ contract LendingPool is Ownable {
         uint256 collateralBTC = collateralBalancesBTC[msg.sender];
         require(collateralBTC > 0, "LendingPool: No collateral deposited");
 
-        // Hitung nilai jaminan dalam USDT
-        // (collateralBTC * btcPriceInUSDT) / 10**18 (karena harga juga punya 18 desimal presisi)
+        // Calculate collateral value in USDT
+        // (collateralBTC * btcPriceInUSDT) / 10**18 (because price also has 18 decimal precision)
         uint256 collateralValueUSDT = (collateralBTC * btcPriceInUSDT) / 1e18; 
         
-        // Hitung maksimal USDT yang bisa dipinjam
+        // Calculate maximum USDT borrowable
         uint256 maxBorrowableUSDT = (collateralValueUSDT * loanToValueRatioPercent) / (100);
         
         uint256 currentBorrowedUSDT = borrowedBalancesUSDT[msg.sender];
@@ -96,7 +96,7 @@ contract LendingPool is Ownable {
         uint256 currentBorrowed = borrowedBalancesUSDT[msg.sender];
         require(_amountUSDTToRepay <= currentBorrowed, "LendingPool: Repay amount exceeds borrowed amount");
 
-        // Untuk MVP, bunga diabaikan. Jika ada bunga, _amountUSDTToRepay harus mencakup pokok + bunga.
+        // For MVP, interest is ignored. If there is interest, _amountUSDTToRepay should include principal + interest.
         mockUSDTToken.transferFrom(msg.sender, address(this), _amountUSDTToRepay);
         borrowedBalancesUSDT[msg.sender] = currentBorrowed - _amountUSDTToRepay;
         
@@ -112,9 +112,9 @@ contract LendingPool is Ownable {
         uint256 currentBorrowedUSDT = borrowedBalancesUSDT[msg.sender];
 
         if (currentBorrowedUSDT > 0) {
-            // Jika masih ada pinjaman, pastikan jaminan sisa masih mencukupi
+            // If there is still a loan, ensure the remaining collateral is sufficient
             uint256 remainingCollateralValueUSDT = (remainingCollateralBTC * (btcPriceInUSDT)) / (1e18);
-            uint256 requiredCollateralValueUSDT = currentBorrowedUSDT * (100) / (loanToValueRatioPercent); // Kebalikan dari LTV
+            uint256 requiredCollateralValueUSDT = currentBorrowedUSDT * (100) / (loanToValueRatioPercent); // Reverse of LTV
             require(remainingCollateralValueUSDT >= requiredCollateralValueUSDT, "LendingPool: Insufficient collateral after withdrawal for existing loan");
         }
 
@@ -124,12 +124,12 @@ contract LendingPool is Ownable {
         emit CollateralWithdrawn(msg.sender, _amountBTCToWithdraw);
     }
 
-    // --- Liquidation (MVP Sederhana) ---
+    // --- Liquidation (Simple MVP) ---
     /**
-     * @dev Likuidasi posisi peminjam jika dibawah jaminan.
-     * Untuk MVP, hanya owner yang bisa melikuidasi.
-     * Liquidator (owner) akan membayar utang USDT peminjam ke pool,
-     * dan mendapatkan jaminan BTC peminjam dengan diskon (atau semua jaminan untuk MVP).
+     * @dev Liquidate borrower's position if undercollateralized.
+     * For MVP, only the owner can liquidate.
+     * The liquidator (owner) will repay the borrower's USDT debt to the pool
+     * and receive the borrower's BTC collateral at a discount (or all collateral for MVP).
      */
     function liquidatePosition(address _borrower) external onlyOwner {
         uint256 collateralBTC = collateralBalancesBTC[_borrower];
@@ -139,41 +139,41 @@ contract LendingPool is Ownable {
 
         uint256 collateralValueUSDT = (collateralBTC * (btcPriceInUSDT)) / (1e18);
         
-        // Kondisi likuidasi: jika nilai jaminan jatuh di bawah nilai hutang (atau batas LTV tertentu)
-        // Untuk MVP, kita buat sederhana: jika nilai jaminan < nilai hutang (artinya LTV > 100%)
+        // Liquidation condition: if collateral value falls below the debt value (or certain LTV threshold)
+        // For MVP, keep it simple: if collateral value < debt value (meaning LTV > 100%)
         require(collateralValueUSDT < borrowedUSDT, "LendingPool: Position is not undercollateralized enough for liquidation");
 
-        // Logika likuidasi MVP: Owner (sebagai liquidator) "membayar" utang USDT peminjam (secara internal)
-        // dan mengambil semua jaminan BTC peminjam.
-        // Pool menerima kembali USDT (sebenarnya hanya pembukuan karena Owner yg trigger)
-        // atau lebih baik: Owner mengirim USDT ke pool untuk melunasi hutang peminjam, lalu Owner terima BTC
+        // MVP liquidation logic: Owner (as liquidator) "repays" the borrower's USDT debt (internally)
+        // and seizes all the borrower's BTC collateral.
+        // The pool regains USDT (accounting-wise since Owner triggers it)
+        // or better: Owner sends USDT to pool to repay borrower's debt, then Owner receives BTC
         
-        // Untuk MVP yang sangat sederhana: Hapus utang peminjam, sita jaminannya untuk kontrak.
-        uint256 seizedCollateral = collateralBTC; // Ambil semua jaminan
+        // For a very simple MVP: Clear borrower's debt and seize all collateral for the contract.
+        uint256 seizedCollateral = collateralBTC; // Seize all collateral
         uint256 debtCleared = borrowedUSDT;
 
         collateralBalancesBTC[_borrower] = 0;
         borrowedBalancesUSDT[_borrower] = 0;
         
-        // Jaminan yang disita menjadi milik kontrak, bisa ditarik oleh owner nanti
-        // atau digunakan untuk menutupi kerugian pool.
-        // mockBTCToken.transfer(owner(), seizedCollateral); // Opsi: langsung ke owner
+        // The seized collateral belongs to the contract, can be withdrawn by the owner later
+        // or used to cover pool losses.
+        // mockBTCToken.transfer(owner(), seizedCollateral); // Option: send directly to owner
 
         emit Liquidated(_borrower, msg.sender, seizedCollateral, debtCleared);
     }
 
-    // Helper untuk melihat kesehatan akun (bisa dipanggil dari frontend)
+    // Helper to check account health (can be called from frontend)
     function getAccountHealth(address _user) external view returns (uint256 healthFactor) {
         uint256 collateralBTC = collateralBalancesBTC[_user];
         uint256 borrowedUSDT = borrowedBalancesUSDT[_user];
 
         if (borrowedUSDT == 0) {
-            return type(uint256).max; // Sehat jika tidak ada pinjaman
+            return type(uint256).max; // Healthy if no debt
         }
         
         uint256 collateralValueUSDT = (collateralBTC * btcPriceInUSDT) / 1e18;
         // Health Factor = (Collateral Value * LTV) / Borrowed Value
-        // Jika HF < 100 (atau 1e18), bisa dilikuidasi
+        // If HF < 100 (or 1e18), can be liquidated
         healthFactor = (collateralValueUSDT * loanToValueRatioPercent * 1e18) / (100 * borrowedUSDT);
         return healthFactor;
     }
